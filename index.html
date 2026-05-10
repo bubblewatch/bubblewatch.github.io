@@ -79,6 +79,11 @@
   .threshold-bar .marker { position: absolute; top: -8px; bottom: -8px; width: 2px; background: var(--ink); transform: translateX(-50%); z-index: 2; }
   .threshold-bar .marker::after { content: ""; position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 8px solid var(--ink); }
   .threshold-bar .marker .marker-label { position: absolute; top: -24px; left: 50%; transform: translateX(-50%); font-family: "IBM Plex Mono", monospace; font-size: 10px; background: var(--ink); color: var(--bg); padding: 3px 7px; white-space: nowrap; letter-spacing: 0.05em; font-weight: 600; }
+  /* Override marker — when category-override rule pushes the verdict above the raw red% tier */
+  .threshold-bar .marker.override { background: #C25E2A; }
+  .threshold-bar .marker.override::after { bottom: auto; top: -6px; border-top: none; border-bottom: 8px solid #C25E2A; }
+  .threshold-bar .marker.override .marker-label { top: auto; bottom: -24px; background: #C25E2A; }
+  .threshold-bar-wrap.has-override { padding-bottom: 28px; }
   @media (max-width: 600px) {
     .threshold-bar .zone-label { font-size: 11px; }
     .threshold-bar .zone-pct { font-size: 9px; }
@@ -202,6 +207,17 @@ function pickEn(en, zh) {
   return (en && en.trim()) ? en : zh;
 }
 
+const TIER_FROM_LABEL_ZH = { '系统性顶部信号': 'top', '系统性顶部': 'top', '高风险预警': 'alert', '中度警戒': 'caution', '观察期': 'observation' };
+const TIER_LABEL_EN = { observation: 'Observation', caution: 'Moderate Caution', alert: 'High Risk Alert', top: 'Systemic Top' };
+const TIER_MID_POS = { observation: 12.5, caution: 32.5, alert: 50, top: 80 };
+
+function tierFromPct(p) {
+  if (p >= 60) return 'top';
+  if (p >= 40) return 'alert';
+  if (p >= 25) return 'caution';
+  return 'observation';
+}
+
 function render(data) {
   const s = data.summary;
   const indicators = data.indicators;
@@ -209,6 +225,15 @@ function render(data) {
   const headlineColor = s.red_pct >= 60 ? '#E63946' : s.red_pct >= 40 ? '#E89B3C' : s.red_pct >= 25 ? '#F1C232' : 'var(--bg)';
   const verdictLabelEn = pickEn(s.verdict_label_en, translateVerdict(s.verdict_label));
   const verdictDescEn = pickEn(s.verdict_desc_en, s.verdict_desc);
+
+  // Override detection: compare raw tier (from red_pct) to effective tier (from verdict_label)
+  const baseTier = tierFromPct(s.red_pct);
+  const effTier = TIER_FROM_LABEL_ZH[s.verdict_label] || baseTier;
+  const overrideActive = effTier !== baseTier;
+  const overridePos = TIER_MID_POS[effTier];
+  const nowText = overrideActive
+    ? `Raw ${s.red_pct.toFixed(1)}% (${TIER_LABEL_EN[baseTier]}) · Override → ${verdictLabelEn}`
+    : `Current ${s.red_pct.toFixed(1)}% · ${verdictLabelEn}`;
 
   const root = document.getElementById('root');
   root.innerHTML = `
@@ -254,9 +279,9 @@ function render(data) {
     <section class="threshold">
       <div class="threshold-header">
         <h3>Threshold Scale</h3>
-        <div class="now">Current ${s.red_pct.toFixed(1)}% · ${escapeHtml(verdictLabelEn)}</div>
+        <div class="now">${escapeHtml(nowText)}</div>
       </div>
-      <div class="threshold-bar-wrap">
+      <div class="threshold-bar-wrap${overrideActive ? ' has-override' : ''}">
         <div class="threshold-bar">
           <div class="zone t-green" style="flex:25">
             <span class="zone-label">Observation</span>
@@ -275,8 +300,12 @@ function render(data) {
             <span class="zone-pct">≥60%</span>
           </div>
           <div class="marker" style="left:${Math.min(Math.max(s.red_pct, 0.5), 99.5)}%">
-            <span class="marker-label">${s.red_pct.toFixed(1)}%</span>
+            <span class="marker-label">Raw ${s.red_pct.toFixed(1)}%</span>
           </div>
+          ${overrideActive ? `
+          <div class="marker override" style="left:${overridePos}%">
+            <span class="marker-label">Override → ${escapeHtml(verdictLabelEn)}</span>
+          </div>` : ''}
         </div>
       </div>
     </section>
