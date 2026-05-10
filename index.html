@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bubble Watch — AI Bubble Risk Monitor</title>
+<meta name="description" content="Weekly tracking of AI bubble risk via 23 leading indicators across 6 categories. Red light ratio ≥60% signals systemic top." />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #FBF7F0;
+    --ink: #1A1815;
+    --red: #7C1D1D;
+    --yellow: #A8761A;
+    --green: #1F4D2C;
+    --muted: #666;
+    --warm: #3A3530;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Lora", "Georgia", serif;
+    min-height: 100vh;
+  }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+  .display { font-family: "Playfair Display", serif; }
+  .container { max-width: 1280px; margin: 0 auto; padding: clamp(20px, 4vw, 48px); }
+
+  /* Masthead */
+  header.masthead { border-bottom: 3px double var(--ink); padding-bottom: 20px; margin-bottom: 32px; }
+  .masthead-row { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.3em; color: var(--red); margin-bottom: 8px; }
+  h1.title { font-family: "Playfair Display", serif; font-size: clamp(36px, 6vw, 64px); font-weight: 900; line-height: 1.05; margin: 0; letter-spacing: -0.02em; }
+  h1.title em { font-style: italic; font-weight: 400; }
+  .issue-meta { text-align: right; font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.8; }
+  .issue-meta .small { margin-top: 8px; color: var(--muted); }
+
+  /* Headline */
+  .headline { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 32px; align-items: stretch; margin-bottom: 48px; }
+  @media (max-width: 720px) { .headline { grid-template-columns: 1fr; } }
+  .big-number {
+    background: var(--ink); color: var(--bg); padding: 32px;
+    display: flex; flex-direction: column; justify-content: space-between; min-height: 320px;
+  }
+  .big-number .label { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.2em; opacity: 0.6; }
+  .big-number .value {
+    font-family: "Playfair Display", serif; font-size: clamp(80px, 14vw, 144px);
+    font-weight: 900; line-height: 0.9; letter-spacing: -0.04em;
+  }
+  .big-number .value sup { font-size: 0.4em; vertical-align: super; }
+  .big-number .breakdown { font-family: "IBM Plex Mono", monospace; font-size: 12px; margin-top: 12px; opacity: 0.7; line-height: 1.6; }
+  .big-number .footer { border-top: 1px solid rgba(251,247,240,0.2); padding-top: 12px; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.15em; opacity: 0.5; }
+
+  .verdict { display: flex; flex-direction: column; justify-content: space-between; }
+  .verdict .label { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.2em; color: var(--red); margin-bottom: 12px; }
+  .verdict h2 { font-family: "Playfair Display", serif; font-size: clamp(28px, 4vw, 42px); font-weight: 700; line-height: 1.15; margin: 0 0 16px 0; letter-spacing: -0.01em; }
+  .verdict p { font-size: 17px; line-height: 1.7; margin: 0; color: var(--warm); }
+  .verdict p em { font-style: italic; }
+  .verdict .footnote { margin-top: 24px; border-top: 1px solid var(--ink); padding-top: 16px; font-family: "IBM Plex Mono", monospace; font-size: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+  /* Threshold scale */
+  section.threshold { margin-bottom: 48px; padding: 4px 0; }
+  .threshold-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; flex-wrap: wrap; gap: 8px; }
+  .threshold-header h3 { font-family: "Playfair Display", serif; font-size: 22px; font-weight: 700; margin: 0; }
+  .threshold-header h3 em { font-style: italic; font-weight: 400; font-size: 0.7em; }
+  .threshold-header .now { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
+  .threshold-bar-wrap { position: relative; padding-top: 28px; }
+  .threshold-bar { position: relative; height: 64px; border: 1px solid var(--ink); display: flex; overflow: visible; }
+  .threshold-bar .zone { height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px 4px; text-align: center; color: #FBF7F0; gap: 3px; min-width: 0; }
+  .threshold-bar .zone.t-green  { background: #1F4D2C; }
+  .threshold-bar .zone.t-yellow { background: #A8761A; }
+  .threshold-bar .zone.t-orange { background: #C25E2A; }
+  .threshold-bar .zone.t-red    { background: #7C1D1D; }
+  .threshold-bar .zone-label { font-family: "Lora", serif; font-size: 13px; font-weight: 700; letter-spacing: 0.05em; line-height: 1.1; }
+  .threshold-bar .zone-pct { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.08em; opacity: 0.9; }
+  .threshold-bar .marker { position: absolute; top: -8px; bottom: -8px; width: 2px; background: var(--ink); transform: translateX(-50%); z-index: 2; }
+  .threshold-bar .marker::after { content: ""; position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 8px solid var(--ink); }
+  .threshold-bar .marker .marker-label { position: absolute; top: -24px; left: 50%; transform: translateX(-50%); font-family: "IBM Plex Mono", monospace; font-size: 10px; background: var(--ink); color: var(--bg); padding: 3px 7px; white-space: nowrap; letter-spacing: 0.05em; font-weight: 600; }
+  @media (max-width: 600px) {
+    .threshold-bar .zone-label { font-size: 11px; }
+    .threshold-bar .zone-pct { font-size: 9px; }
+  }
+
+  /* Trend */
+  section.trend { margin-bottom: 48px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 24px 0; }
+  .trend-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; flex-wrap: wrap; gap: 8px; }
+  .trend-header h3 { font-family: "Playfair Display", serif; font-size: 22px; font-weight: 700; margin: 0; }
+  .trend-header h3 em { font-style: italic; font-weight: 400; font-size: 0.7em; }
+  .trend-legend { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; }
+  #trend-chart-wrap { position: relative; height: 220px; }
+
+  /* Categories */
+  section.category { margin-bottom: 40px; }
+  .category-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+  .category-header .titles { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .category-header h3 { font-family: "Playfair Display", serif; font-size: 28px; font-weight: 900; margin: 0; letter-spacing: -0.01em; }
+  .category-header .sub { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.2em; color: var(--muted); }
+  .category-header .counts { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .counts .red { color: var(--red); }
+  .counts .yellow { color: var(--yellow); }
+
+  .indicator-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 16px; }
+  article.indicator { border: 1px solid var(--ink); background: var(--bg); padding: 18px; position: relative; display: flex; flex-direction: column; gap: 10px; }
+  article.indicator .status-bar { position: absolute; top: 0; left: 0; width: 100%; height: 4px; }
+  .status-bar.red { background: var(--red); }
+  .status-bar.yellow { background: var(--yellow); }
+  .status-bar.green { background: var(--green); }
+  article.indicator .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-top: 4px; }
+  article.indicator .name { font-family: "Lora", serif; font-size: 16px; font-weight: 600; line-height: 1.25; }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 4px 8px; letter-spacing: 0.1em; font-weight: 600; white-space: nowrap; color: var(--bg); }
+  .badge.red { background: var(--red); }
+  .badge.yellow { background: var(--yellow); }
+  .badge.green { background: var(--green); }
+  article.indicator .number { font-family: "Playfair Display", serif; font-size: 38px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+  article.indicator .number .unit { font-size: 0.5em; font-weight: 400; margin-left: 2px; }
+  article.indicator .note { font-family: "Lora", serif; font-size: 13px; color: var(--warm); line-height: 1.55; font-style: italic; }
+  article.indicator .meta { border-top: 1px dashed #999; padding-top: 8px; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; }
+  article.indicator.stale::after { content: "STALE"; position: absolute; top: 8px; right: 8px; font-family: "IBM Plex Mono", monospace; font-size: 9px; padding: 2px 5px; background: #ddd; color: #555; letter-spacing: 0.1em; }
+
+  /* WoW */
+  section.wow { margin-bottom: 40px; background: var(--ink); color: var(--bg); padding: 28px; }
+  section.wow .label { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.2em; opacity: 0.6; margin-bottom: 16px; }
+  .wow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; }
+  .wow-item .tag { font-family: "IBM Plex Mono", monospace; font-size: 10px; margin-bottom: 4px; }
+  .wow-item .tag.up { color: var(--yellow); }
+  .wow-item .tag.down { color: #7DB37C; }
+  .wow-item .tag.flat { color: #999; }
+  .wow-item .text { font-family: "Lora", serif; font-size: 14px; line-height: 1.6; }
+
+  /* Watch */
+  section.watch { margin-bottom: 48px; }
+  section.watch h3 { font-family: "Playfair Display", serif; font-size: 24px; font-weight: 700; margin: 0 0 16px 0; border-bottom: 1px solid var(--ink); padding-bottom: 8px; }
+  section.watch h3 em { font-style: italic; font-weight: 400; }
+  .watch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+  .watch-item { border-left: 3px solid var(--red); padding-left: 14px; }
+  .watch-item .icon { font-family: "Playfair Display", serif; font-size: 20px; font-weight: 700; color: var(--red); margin-bottom: 4px; }
+  .watch-item .title { font-family: "Lora", serif; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .watch-item .desc { font-family: "Lora", serif; font-size: 13px; line-height: 1.6; color: var(--warm); }
+
+  /* Footer */
+  footer.method { border-top: 3px double var(--ink); padding-top: 24px; margin-top: 48px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); line-height: 1.7; }
+  .method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 24px; }
+  .method-grid h4 { color: var(--ink); font-weight: 600; margin: 0 0 6px 0; font-family: inherit; font-size: 11px; }
+  .lang-switch { font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+  .lang-switch a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--ink); padding-bottom: 1px; }
+
+  /* Loading state */
+  .loading { padding: 80px 0; text-align: center; font-family: "IBM Plex Mono", monospace; color: var(--muted); }
+  .error { padding: 40px; background: #fee; border-left: 4px solid var(--red); margin: 32px 0; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--red); }
+</style>
+</head>
+<body>
+<div class="container" id="root">
+  <div class="loading">Loading data...</div>
+</div>
+
+<script>
+const CATEGORY_ORDER = [
+  { key: 'valuation',        en: 'Valuation',        sub: 'VALUATION' },
+  { key: 'capital',          en: 'Capital',          sub: 'CAPITAL' },
+  { key: 'market_structure', en: 'Market Structure', sub: 'MARKET STRUCTURE' },
+  { key: 'credit',           en: 'Credit',           sub: 'CREDIT' },
+  { key: 'fundamentals',     en: 'Fundamentals',     sub: 'FUNDAMENTALS' },
+  { key: 'macro',            en: 'Macro',            sub: 'MACRO' }
+];
+
+const VERDICT_TRANSLATIONS = {
+  '系统性顶部信号': 'Systemic Top Signal',
+  '系统性顶部': 'Systemic Top',
+  '高风险预警': 'High Risk Alert',
+  '中度警戒': 'Moderate Caution',
+  '观察期': 'Observation'
+};
+
+const WATCH_LIST = [
+  { icon: '①', title: 'Hyperscaler Capex Guidance', desc: 'Any Mag7 cutting current-year capex guidance at next earnings → RED. A structural top signal.' },
+  { icon: '②', title: 'Fed Policy Path', desc: 'If oil/CPI forces the Fed to resume hiking, the setup mirrors 1999-2000 and the 1845 Railway Mania top.' },
+  { icon: '③', title: 'CoreWeave / Nebius Credit', desc: 'Data-center ABS spreads widening 50bps+ is the earliest signal of vendor-financing chain stress.' },
+  { icon: '④', title: 'OpenAI Auditor Disclosure', desc: 'Raised by Burry but unconfirmed. Any round-tripping investigation is an immediate RED.' },
+  { icon: '⑤', title: 'Anthropic IPO Timing', desc: 'If the planned October IPO proceeds, the "AI IPO flood" indicator may flip to RED.' },
+  { icon: '⑥', title: 'Mag7 Insider Selling', desc: 'Currently sporadic Thiel-style cases; watch whether it spreads to Mag7 executives broadly.' }
+];
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function statusBadge(status) {
+  const map = { red: '● RED', yellow: '◐ YELLOW', green: '○ GREEN' };
+  return `<span class="badge ${status}">${map[status] || status}</span>`;
+}
+
+function translateVerdict(zh) {
+  return VERDICT_TRANSLATIONS[zh] || zh;
+}
+
+// Fallback chain for bilingual fields: prefer English, fall back to Chinese
+function pickEn(en, zh) {
+  return (en && en.trim()) ? en : zh;
+}
+
+function render(data) {
+  const s = data.summary;
+  const indicators = data.indicators;
+  const issueNo = String(data.issue_number).padStart(3, '0');
+  const headlineColor = s.red_pct >= 60 ? '#E63946' : s.red_pct >= 40 ? '#E89B3C' : s.red_pct >= 25 ? '#F1C232' : 'var(--bg)';
+  const verdictLabelEn = pickEn(s.verdict_label_en, translateVerdict(s.verdict_label));
+  const verdictDescEn = pickEn(s.verdict_desc_en, s.verdict_desc);
+
+  const root = document.getElementById('root');
+  root.innerHTML = `
+    <header class="masthead">
+      <div class="masthead-row">
+        <div>
+          <div class="kicker">23 INDICATORS · UPDATED EVERY MONDAY</div>
+          <h1 class="title">Bubble Watch<br/><em>AI Edition</em></h1>
+        </div>
+        <div class="issue-meta">
+          <div>ISSUE NO. ${issueNo}</div>
+          <div>${escapeHtml(data.as_of_date)}</div>
+          <div class="small">${s.total_indicators} INDICATORS · 6 CATEGORIES</div>
+        </div>
+      </div>
+    </header>
+
+    <section class="headline">
+      <div class="big-number">
+        <div class="label">RED LIGHT RATIO</div>
+        <div>
+          <div class="value" style="color:${headlineColor}">${s.red_pct.toFixed(1)}<sup>%</sup></div>
+          <div class="breakdown">
+            ${s.red_count} red / ${s.yellow_count} yellow / ${s.green_count} green<br/>
+            Tiers: 25% yellow / 40% orange / 60% red
+          </div>
+        </div>
+        <div class="footer">WEIGHTED RISK SCORE: ${s.weighted_risk_score.toFixed(1)}%</div>
+      </div>
+      <div class="verdict">
+        <div>
+          <div class="label">THIS WEEK'S VERDICT</div>
+          <h2>${escapeHtml(verdictLabelEn)}</h2>
+          <p>${escapeHtml(verdictDescEn)}</p>
+        </div>
+        <div class="footnote">
+          <span>Issue ${issueNo} · ${escapeHtml(data.as_of_date)}</span>
+          <span>Reference: 2000-03 (CAPE 44.19, NDX -78%)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="threshold">
+      <div class="threshold-header">
+        <h3>Threshold Scale</h3>
+        <div class="now">Current ${s.red_pct.toFixed(1)}% · ${escapeHtml(verdictLabelEn)}</div>
+      </div>
+      <div class="threshold-bar-wrap">
+        <div class="threshold-bar">
+          <div class="zone t-green" style="flex:25">
+            <span class="zone-label">Observation</span>
+            <span class="zone-pct">0–25%</span>
+          </div>
+          <div class="zone t-yellow" style="flex:15">
+            <span class="zone-label">Moderate Caution</span>
+            <span class="zone-pct">25–40%</span>
+          </div>
+          <div class="zone t-orange" style="flex:20">
+            <span class="zone-label">High Risk Alert</span>
+            <span class="zone-pct">40–60%</span>
+          </div>
+          <div class="zone t-red" style="flex:40">
+            <span class="zone-label">Systemic Top</span>
+            <span class="zone-pct">≥60%</span>
+          </div>
+          <div class="marker" style="left:${Math.min(Math.max(s.red_pct, 0.5), 99.5)}%">
+            <span class="marker-label">${s.red_pct.toFixed(1)}%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="trend">
+      <div class="trend-header">
+        <h3>Red Light Ratio <em>· 8-Week Trend</em></h3>
+        <div class="trend-legend">
+          <span><span style="color:var(--red)">●</span> Red %</span>
+          <span><span style="color:var(--yellow)">●</span> Risk Score</span>
+          <span style="color:var(--muted)">Tiers: 25 / 40 / 60</span>
+        </div>
+      </div>
+      <div id="trend-chart-wrap"><canvas id="trend-chart"></canvas></div>
+    </section>
+
+    ${CATEGORY_ORDER.map(cat => {
+      const items = indicators.filter(i => i.category === cat.key);
+      if (!items.length) return '';
+      const r = items.filter(i => i.status === 'red').length;
+      const y = items.filter(i => i.status === 'yellow').length;
+      return `
+        <section class="category">
+          <div class="category-header">
+            <div class="titles">
+              <h3>${cat.en}</h3>
+              <span class="sub">${cat.sub}</span>
+            </div>
+            <div class="counts">
+              ${items.length} indicators · <span class="red">${r} red</span> · <span class="yellow">${y} yellow</span>
+            </div>
+          </div>
+          <div class="indicator-grid">
+            ${items.map(ind => {
+              const noteEn = pickEn(ind.note_en, ind.note);
+              return `
+              <article class="indicator${ind.stale ? ' stale' : ''}">
+                <div class="status-bar ${ind.status}"></div>
+                <div class="head">
+                  <div>
+                    <div class="name">${escapeHtml(ind.name_en)}</div>
+                  </div>
+                  ${statusBadge(ind.status)}
+                </div>
+                <div class="number">${escapeHtml(ind.value_display || ind.value)}</div>
+                <div class="note">${escapeHtml(noteEn)}</div>
+                <div class="meta">
+                  <span>${escapeHtml(ind.threshold_text_en || ind.threshold_text)}</span>
+                  <span>${escapeHtml(ind.source_name)}</span>
+                </div>
+              </article>
+            `}).join('')}
+          </div>
+        </section>
+      `;
+    }).join('')}
+
+    ${(data.wow_changes && data.wow_changes.length) ? `
+      <section class="wow">
+        <div class="label">WEEK-OVER-WEEK CHANGES</div>
+        <div class="wow-grid">
+          ${data.wow_changes.map(w => {
+            const tagClass = w.type === 'status_upgrade' ? 'up' : w.type === 'status_downgrade' ? 'down' : 'flat';
+            const tagLabel = w.type === 'status_upgrade' ? '▲ Risk Up' : w.type === 'status_downgrade' ? '▼ Risk Down' : '━ Flat';
+            const noteEn = pickEn(w.note_en, w.note);
+            return `
+              <div class="wow-item">
+                <div class="tag ${tagClass}">${tagLabel}</div>
+                <div class="text">${escapeHtml(noteEn)}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    ` : ''}
+
+    <section class="watch">
+      <h3>What to Watch</h3>
+      <div class="watch-grid">
+        ${WATCH_LIST.map(w => `
+          <div class="watch-item">
+            <div class="icon">${w.icon}</div>
+            <div class="title">${escapeHtml(w.title)}</div>
+            <div class="desc">${escapeHtml(w.desc)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+
+    <footer class="method">
+      <div class="method-grid">
+        <div>
+          <h4>Methodology</h4>
+          <div>23 leading indicators across 6 categories. Each is scored RED / YELLOW / GREEN against historically-calibrated thresholds. Red light ratio ≥60% = systemic top signal. Weighted risk score = (red × 1.0 + yellow × 0.5) / total. Thresholds are anchored to past bubble peaks.</div>
+        </div>
+        <div>
+          <h4>Historical Calibration</h4>
+          <div>In the 6-12 months before the 2000 dot-com top, the 1845 Railway Mania top, and the 1996 telecom bubble top, the same indicators flashed: insider selling, capex / FCF divergence, breadth deterioration, vendor financing, CEO hedging language.</div>
+        </div>
+        <div>
+          <h4>Disclaimer</h4>
+          <div>Framework research, not investment advice. Thresholds may evolve. Issue ${issueNo} · ${escapeHtml(data.as_of_date)}. <span class="lang-switch">中文版: <a href="https://aibubble-cn.github.io" target="_blank">aibubble-cn.github.io</a></span></div>
+        </div>
+      </div>
+    </footer>
+  `;
+
+  drawTrend(data);
+}
+
+function drawTrend(data) {
+  const seed = data.history_seed || [];
+  if (!seed.length) return;
+  const ctx = document.getElementById('trend-chart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: seed.map(s => s.week),
+      datasets: [
+        {
+          label: 'Red %',
+          data: seed.map(s => s.red_pct),
+          borderColor: '#7C1D1D',
+          backgroundColor: '#7C1D1D',
+          borderWidth: 2.5,
+          tension: 0.3,
+          pointRadius: 4
+        },
+        {
+          label: 'Risk Score',
+          data: seed.map(s => s.risk_score),
+          borderColor: '#A8761A',
+          backgroundColor: '#A8761A',
+          borderWidth: 1.5,
+          borderDash: [3, 3],
+          tension: 0.3,
+          pointRadius: 3
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1A1815',
+          titleFont: { family: 'IBM Plex Mono' },
+          bodyFont: { family: 'IBM Plex Mono' }
+        }
+      },
+      scales: {
+        x: { ticks: { font: { family: 'IBM Plex Mono', size: 11 }, color: '#1A1815' }, grid: { display: false } },
+        y: {
+          min: 0, max: 70,
+          ticks: { font: { family: 'IBM Plex Mono', size: 11 }, color: '#1A1815', callback: v => v + '%' },
+          grid: { color: 'rgba(0,0,0,0.05)' }
+        }
+      }
+    }
+  });
+}
+
+async function load() {
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/crystal-xiaoxiao/ai-bubble-monitor/main/docs/data/latest.json?t=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('root').innerHTML = `
+      <div class="error">Failed to load data: ${escapeHtml(e.message)}<br>Check that data/latest.json exists.</div>
+    `;
+  }
+}
+load();
+</script>
+</body>
+</html>
