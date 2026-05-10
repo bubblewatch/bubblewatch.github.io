@@ -312,6 +312,7 @@ function render(data) {
           <div class="indicator-grid">
             ${items.map(ind => {
               const noteEn = pickEn(ind.note_en, ind.note);
+              const valueEn = ind.value_display_en || ind.value_display || ind.value;
               return `
               <article class="indicator${ind.stale ? ' stale' : ''}">
                 <div class="status-bar ${ind.status}"></div>
@@ -321,7 +322,7 @@ function render(data) {
                   </div>
                   ${statusBadge(ind.status)}
                 </div>
-                <div class="number">${escapeHtml(ind.value_display || ind.value)}</div>
+                <div class="number">${escapeHtml(valueEn)}</div>
                 <div class="note">${escapeHtml(noteEn)}</div>
                 <div class="meta">
                   <span>${escapeHtml(ind.threshold_text_en || ind.threshold_text)}</span>
