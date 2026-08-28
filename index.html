@@ -58,6 +58,8 @@
   .verdict .label { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.2em; color: var(--red); margin-bottom: 12px; }
   .verdict h2 { font-family: "Playfair Display", serif; font-size: clamp(28px, 4vw, 42px); font-weight: 700; line-height: 1.15; margin: 0 0 16px 0; letter-spacing: -0.01em; }
   .verdict p { font-size: 17px; line-height: 1.7; margin: 0; color: var(--warm); }
+  .verdict p + p { margin-top: 0.75em; }
+  .verdict p strong { font-weight: 700; color: var(--ink); }
   .verdict p em { font-style: italic; }
   .verdict .footnote { margin-top: 24px; border-top: 1px solid var(--ink); padding-top: 16px; font-family: "IBM Plex Mono", monospace; font-size: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
@@ -68,6 +70,13 @@
   .trend-header h3 em { font-style: italic; font-weight: 400; font-size: 0.7em; }
   .trend-legend { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; }
   #trend-chart-wrap { position: relative; height: 220px; }
+
+  /* Credit spread small multiples (series magnitudes differ ~10x, so independent y axes) */
+  .credit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 720px) { .credit-grid { grid-template-columns: 1fr; } }
+  .credit-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .credit-label b { color: var(--ink); letter-spacing: 0.08em; }
+  .credit-chart-wrap { position: relative; height: 180px; }
 
   /* Categories */
   section.category { margin-bottom: 40px; }
@@ -193,6 +202,39 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Paragraphize verdict_desc: escape first, then convert **bold** (XSS-safe), split on blank lines;
+// legacy format (2026-08-16 and earlier: one giant unbroken block) falls back to fallbackSplit
+function renderVerdictDesc(text) {
+  const t = (text == null ? '' : String(text)).trim();
+  if (!t) return '';
+  const paras = /\n\s*\n/.test(t) ? t.split(/\n\s*\n/) : fallbackSplit(t);
+  return paras.filter(p => p.trim()).map(p => {
+    let h = escapeHtml(p.trim()).replace(/\n/g, '<br/>');
+    h = h.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+    return `<p>${h}</p>`;
+  }).join('');
+}
+
+function fallbackSplit(t) {
+  // Tier 1: split at legacy section markers (Chinese fallback path via pickEn)
+  const bySection = t.split(/(?=①|②|③|④|⑤|判读：|历史相似度：|分母提醒：|一句话：)/).filter(s => s.trim());
+  if (bySection.length >= 2) return bySection;
+  // Tier 2: group sentences into paragraphs (ASCII periods must be followed by whitespace to spare decimals)
+  const sentences = t.match(/[\s\S]*?(?:[。！？]|[.!?](?=\s|$))[”』」)）]*/g);
+  if (!sentences) return [t];
+  const matchedLen = sentences.join('').length;
+  if (matchedLen < t.length) sentences.push(t.slice(matchedLen));
+  const target = /[一-鿿]/.test(t) ? 400 : 600;
+  const paras = [];
+  let cur = '';
+  for (const s of sentences) {
+    cur += s;
+    if (cur.length >= target) { paras.push(cur); cur = ''; }
+  }
+  if (cur.trim()) paras.push(cur);
+  return paras.length ? paras : [t];  // Tier 3: return as-is, same as old behavior
+}
+
 function statusBadge(status) {
   const map = { red: '● RED', yellow: '◐ YELLOW', green: '○ GREEN' };
   return `<span class="badge ${status}">${map[status] || status}</span>`;
@@ -217,7 +259,7 @@ function tierFromPct(p) {
   return 'observation';
 }
 
-function render(data) {
+function render(data, credit) {
   const s = data.summary;
   const indicators = data.indicators;
   const issueNo = String(data.issue_number).padStart(3, '0');
@@ -262,7 +304,7 @@ function render(data) {
         <div>
           <div class="label">THIS WEEK'S VERDICT</div>
           <h2>${escapeHtml(verdictLabelEn)}</h2>
-          <p>${escapeHtml(verdictDescEn)}</p>
+          ${renderVerdictDesc(verdictDescEn)}
         </div>
         <div class="footnote">
           <span>Issue ${issueNo} · ${escapeHtml(data.as_of_date)}</span>
@@ -320,6 +362,8 @@ function render(data) {
       </div>
       <div id="trend-chart-wrap"><canvas id="trend-chart"></canvas></div>
     </section>
+
+    ${creditSectionHtml(credit)}
 
     ${CATEGORY_ORDER.map(cat => {
       const items = indicators.filter(i => i.category === cat.key);
@@ -420,6 +464,108 @@ function render(data) {
   `;
 
   drawTrend(data);
+  drawCreditTrend(credit);
+}
+
+// AI infra credit spread small multiples: data from credit_spread_history.json, rewritten weekly
+// by the main repo's prefetch workflow. Missing/malformed file → whole section hidden (graceful degrade).
+const CREDIT_PANELS = [
+  { key: 'hy', canvas: 'credit-hy', title: 'HY OAS', desc: 'Broad high yield', thresholds: [{ v: 350, color: '#F1C232' }, { v: 500, color: '#E63946' }] },
+  { key: 'ccc', canvas: 'credit-ccc', title: 'CCC OAS', desc: 'Neocloud rating tail', thresholds: [] },
+  { key: 'ig', canvas: 'credit-ig', title: 'IG OAS', desc: 'Hyperscaler funding base', thresholds: [] }
+];
+
+function creditValid(credit) {
+  return !!(credit && credit.series && CREDIT_PANELS.every(p => Array.isArray(credit.series[p.key]) && credit.series[p.key].length > 1));
+}
+
+function creditSectionHtml(credit) {
+  if (!creditValid(credit)) return '';
+  const lastDate = credit.series.hy[credit.series.hy.length - 1].date;
+  return `
+    <section class="trend">
+      <div class="trend-header">
+        <h3>AI Infra Credit Spreads <em>· 1-Year · FRED Daily</em></h3>
+        <div class="trend-legend">
+          <span>Latest obs ${escapeHtml(lastDate)}</span>
+          <span style="color:var(--muted)">HY thresholds: 350 yellow / 500 red</span>
+        </div>
+      </div>
+      <div class="credit-grid">
+        ${CREDIT_PANELS.map(p => {
+          const pts = credit.series[p.key];
+          const last = pts[pts.length - 1];
+          const prev = pts[Math.max(0, pts.length - 6)]; // ~5 trading days ago
+          const d = last.bps - prev.bps;
+          return `<div>
+            <div class="credit-label"><b>${p.title}</b><span>${p.desc} · ${last.bps}bp (5d ${d >= 0 ? '+' : ''}${d})</span></div>
+            <div class="credit-chart-wrap"><canvas id="${p.canvas}"></canvas></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>`;
+}
+
+function drawCreditTrend(credit) {
+  if (!creditValid(credit)) return;
+  CREDIT_PANELS.forEach(p => {
+    const ctx = document.getElementById(p.canvas);
+    if (!ctx) return;
+    const pts = credit.series[p.key];
+    const labels = pts.map(x => x.date);
+    const datasets = [{
+      label: p.title,
+      data: pts.map(x => x.bps),
+      borderColor: '#7C1D1D',
+      backgroundColor: '#7C1D1D',
+      borderWidth: 2,
+      tension: 0.3,
+      pointRadius: 0,
+      pointHitRadius: 6
+    }].concat(p.thresholds.map(th => ({
+      label: String(th.v),
+      data: labels.map(() => th.v),
+      borderColor: th.color,
+      backgroundColor: th.color,
+      borderWidth: 1,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      pointHitRadius: 0
+    })));
+    new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1A1815',
+            titleFont: { family: 'IBM Plex Mono' },
+            bodyFont: { family: 'IBM Plex Mono' },
+            filter: item => item.datasetIndex === 0,
+            callbacks: { label: item => ' ' + item.parsed.y + ' bps' }
+          }
+        },
+        scales: {
+          x: {
+            ticks: {
+              font: { family: 'IBM Plex Mono', size: 10 }, color: '#1A1815',
+              maxTicksLimit: 5, maxRotation: 0,
+              callback: function (v) { return String(this.getLabelForValue(v)).slice(0, 7); }
+            },
+            grid: { display: false }
+          },
+          y: {
+            ticks: { font: { family: 'IBM Plex Mono', size: 10 }, color: '#1A1815', maxTicksLimit: 6, callback: v => v + 'bp' },
+            grid: { color: 'rgba(0,0,0,0.05)' }
+          }
+        }
+      }
+    });
+  });
 }
 
 function drawTrend(data) {
@@ -478,10 +624,20 @@ function drawTrend(data) {
 
 async function load() {
   try {
-    const r = await fetch('https://raw.githubusercontent.com/crystal-xiaoxiao/ai-bubble-monitor/main/docs/data/latest.json?t=' + Date.now());
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    render(data);
+    // credit JSON is optional: on 404/parse failure pass null and the section hides itself
+    const BASE = 'https://raw.githubusercontent.com/crystal-xiaoxiao/ai-bubble-monitor/main/docs/data/';
+    const [latestRes, creditRes] = await Promise.allSettled([
+      fetch(BASE + 'latest.json?t=' + Date.now()),
+      fetch(BASE + 'credit_spread_history.json?t=' + Date.now())
+    ]);
+    if (latestRes.status !== 'fulfilled') throw latestRes.reason;
+    if (!latestRes.value.ok) throw new Error('HTTP ' + latestRes.value.status);
+    const data = await latestRes.value.json();
+    let credit = null;
+    if (creditRes.status === 'fulfilled' && creditRes.value.ok) {
+      credit = await creditRes.value.json().catch(() => null);
+    }
+    render(data, credit);
   } catch (e) {
     document.getElementById('root').innerHTML = `
       <div class="error">Failed to load data: ${escapeHtml(e.message)}<br>Check that data/latest.json exists.</div>
